@@ -23,7 +23,7 @@ class Entry:
     name: str
     typecode: str
     compressed: bool
-    data: bytes
+    rawdata: bytes
 
 
 class Pack:
@@ -90,7 +90,7 @@ class Pack:
             self.f.seek(self.archive_start_offset + entry_offset, os.SEEK_SET)
             entry[name] = Entry(
                 name=name,
-                data=self.f.read(data_length),
+                rawdata=self.f.read(data_length),
                 compressed=bool(compression_flag),
                 typecode=typecode,
             )
@@ -111,10 +111,9 @@ class Pack:
             before_write_archive = dst.tell()
             for entry in self.entries.values():
                 name = entry.name.encode()
-                data = entry.data
+                data = entry.rawdata
                 uncompressed_size = len(data)
-                if entry.compressed:
-                    data = zlib.compress(data)
+                
 
                 entry_size = TOC_ENTRY_LENGTH + len(name)
                 if entry_size % 16 != 0:
