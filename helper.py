@@ -24,6 +24,7 @@ class Entry:
     typecode: str
     compressed: bool
     rawdata: bytes
+    uncompressed_length: int
 
 
 class Pack:
@@ -63,13 +64,13 @@ class Pack:
         self.entries = self._parse_toc(toc_data)
 
     def _parse_toc(self, data: bytes) -> dict[str, Entry]:
-        options = []
         entry = {}
         cur_pos = 0
+
         while cur_pos < len(data):
             (
                 entry_length,
-                entry_offset,
+                data_offset,
                 data_length,
                 uncompressed_length,
                 compression_flag,
@@ -77,6 +78,7 @@ class Pack:
             ) = struct.unpack(
                 TOC_ENTRY_FORMAT, data[cur_pos : (cur_pos + TOC_ENTRY_LENGTH)]
             )
+            
             cur_pos += TOC_ENTRY_LENGTH
 
             name_length = entry_length - TOC_ENTRY_LENGTH
@@ -87,12 +89,16 @@ class Pack:
 
             typecode = typecode.decode("ascii")
 
-            self.f.seek(self.archive_start_offset + entry_offset, os.SEEK_SET)
+            if name in entry:
+                print("WARNING!! dup")
+
+            self.f.seek(self.archive_start_offset + data_offset, os.SEEK_SET)
             entry[name] = Entry(
                 name=name,
                 rawdata=self.f.read(data_length),
                 compressed=bool(compression_flag),
                 typecode=typecode,
+                uncompressed_length=uncompressed_length,
             )
 
         return entry
@@ -106,38 +112,32 @@ class Pack:
             dst.seek(self.archive_start_offset, os.SEEK_SET)
 
             toc = bytearray()
-            offset = 0
 
             before_write_archive = dst.tell()
             for entry in self.entries.values():
-                name = entry.name.encode()
-                data = entry.rawdata
-                uncompressed_size = len(data)
-                
+                data_offset = dst.tell() - self.archive_start_offset
+                name = entry.name.encode() + b"\x00"
 
-                entry_size = TOC_ENTRY_LENGTH + len(name)
-                if entry_size % 16 != 0:
-                    padding_length = 16 - (entry_size % 16)
+                entry_length = TOC_ENTRY_LENGTH + len(name)
+                if entry_length % 16 != 0:
+                    padding_length = 16 - (entry_length % 16)
                     name += b"\x00" * padding_length
 
-                    entry_size += padding_length
-
-                data_size = len(data)
+                    entry_length += padding_length
 
                 toc.extend(
                     struct.pack(
                         TOC_ENTRY_FORMAT,
-                        entry_size,
-                        offset,
-                        data_size,
-                        uncompressed_size,
+                        entry_length,
+                        data_offset,
+                        len(entry.rawdata),
+                        entry.uncompressed_length,
                         int(entry.compressed),
                         entry.typecode.encode(),
                     )
                     + name
                 )
-                dst.write(data)
-                offset += entry_size
+                dst.write(entry.rawdata)
 
             toc_offset = dst.tell() - self.archive_start_offset
             dst.write(toc)
@@ -156,3 +156,4 @@ class Pack:
             )
 
             dst.truncate()
+
