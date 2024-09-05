@@ -103,14 +103,27 @@ class Pack:
 
         return entry
 
-    def save(self, filename: str):
-        with open(filename, "wb") as dst:
-            # copy
-            self.f.seek(0, os.SEEK_SET)
-            copyfileobj(self.f, dst)
+    def save(self, filename: str, bootloader=None):
+        if bootloader:
+            with open(filename, "wb") as dst:
+                with open(bootloader, "rb") as src:
+                    copyfileobj(src, dst)
+        
+            from PyInstaller.utils.win32.winresource import remove_all_resources
+            from PyInstaller.utils.win32.winmanifest import write_manifest_to_executable, create_application_manifest
+            remove_all_resources(filename)
+            write_manifest_to_executable(filename, create_application_manifest())
 
+            with open(filename, "rb") as dst:
+                dst.seek(0, os.SEEK_END)
+                self.archive_start_offset = dst.tell()
+
+        with open(filename, "ab") as dst:
+            if not bootloader:
+                self.f.seek(0, os.SEEK_SET)
+                copyfileobj(self.f, dst)
+                
             dst.seek(self.archive_start_offset, os.SEEK_SET)
-
             toc = bytearray()
 
             before_write_archive = dst.tell()
@@ -124,7 +137,7 @@ class Pack:
                     name += b"\x00" * padding_length
 
                     entry_length += padding_length
-
+                    
                 toc.extend(
                     struct.pack(
                         TOC_ENTRY_FORMAT,
@@ -156,4 +169,3 @@ class Pack:
             )
 
             dst.truncate()
-
